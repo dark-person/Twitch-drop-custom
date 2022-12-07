@@ -4,15 +4,26 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
 	"gopkg.in/ini.v1"
 )
 
+type schedule struct {
+	task_id     int
+	start_time  time.Time
+	twitch_link string
+	duration    int // in minutes
+}
+
+// =================================
+
 func main() {
 	//var twitch_link string
 	//var duration_minute int
+	task_list := make([]schedule, 0)
 
 	// flag.StringVar(&twitch_link, "link", "https://www.twitch.tv/warframe", "[Required] The link for twitch drop")
 	// flag.IntVar(&duration_minute, "time", 60, "[Required] The duration for the stream last. Unit is minute. Default is 60 minutes.")
@@ -47,32 +58,53 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Println(until.String())
-		fmt.Println(time.Now().String())
+		// Parse the config to object
+		task_list = append(task_list, schedule{task_id: i + 1, twitch_link: twitch_link, duration: duration_minute, start_time: until})
+
+		// fmt.Println(until.String())
+		// fmt.Println(time.Now().String())
 
 		// fmt.Println(until.Equal(time.Now()))
 		// fmt.Println(until.Before(time.Now()))
 		// fmt.Println(until.After(time.Now()))
 
-		if until.Before(time.Now()) {
-			fmt.Println("Task Outdated.")
-			os.Exit(1)
-		}
+		// if until.Before(time.Now()) {
+		// 	fmt.Println("Task Outdated.")
+		// 	os.Exit(1)
+		// }
 
-		time.Sleep(time.Until(until))
-		fmt.Println("Task Completed.")
+		// time.Sleep(time.Until(until))
+		// fmt.Println("Task Completed.")
 
-		//exec.Command("cmd.exe", "/C", "twitch_drop_general.bat", twitch_link, strconv.Itoa(duration_minute))
-		break
+		// //exec.Command("cmd.exe", "/C", "twitch_drop_general.bat", twitch_link, strconv.Itoa(duration_minute))
+		// break
 	}
 
-	// Parse the config to object
-
 	// Sort the object due to time order
+	sort.Slice(task_list, func(i, j int) bool {
 
-	// Notify the outdated task
+		if task_list[i].start_time.Before(task_list[j].start_time) {
+			return true
+		}
+
+		if task_list[i].start_time.Equal(task_list[j].start_time) && task_list[i].task_id < task_list[j].task_id {
+			return true
+		}
+
+		return false
+	})
+
+	fmt.Println(task_list)
 
 	// Start Main loop
+	for _, item := range task_list {
+		// Notify the outdated task
+		if item.start_time.Before(time.Now()) {
+			fmt.Println("Task", item.task_id, "Outdated.")
+			continue
+		}
+
+	}
 
 	// Sleep until time come
 
