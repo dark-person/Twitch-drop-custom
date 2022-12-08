@@ -14,20 +14,57 @@ type schedule struct {
 	duration    int // in minutes
 }
 
+type ScheduleConfig struct {
+	Link string
+	// start_time string `mapstructure:"start_time"`
+	Duration int
+}
+
+func (config *ScheduleConfig) ToString() string {
+	return fmt.Sprintf("Link: %s, Duration: %d", config.Link, config.Duration)
+}
+
 type Config struct {
-	Version int
+	Version int `mapstructure:"last_updated"`
+	Task    []ScheduleConfig
+	//Task []map[string]string
 }
 
 // =================================
 
 func main() {
-	viper.SetConfigName("schedule")
-	viper.SetConfigType("yaml")
+	viper.SetConfigFile("schedule.yaml")
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {
 		// Handle errors reading the config file
 		panic(fmt.Errorf("fatal error config file: %w", err))
 	}
+
+	var temp Config
+	err = viper.Unmarshal(&temp)
+	fmt.Println(temp.Version)
+	for _, task := range temp.Task {
+		fmt.Println(task.ToString())
+	}
+
+	// version_number := viper.GetInt("last_updated")
+	// fmt.Println(version_number)
+
+	// var temp ScheduleConfig
+	// err = viper.UnmarshalKey("a", &temp)
+	// if err != nil {
+	// 	fmt.Println("Error:", err)
+	// 	return
+	// }
+
+	//fmt.Println(temp)
+
+	// var config []ScheduleConfig
+	// if err := viper.UnmarshalKey("task", &config); err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// fmt.Println(config)
 
 	// //var twitch_link string
 	// //var duration_minute int
