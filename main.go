@@ -147,6 +147,10 @@ func main() {
 	wg.Wait()
 	fmt.Println("All Task is completed.")
 
+	// User promot to leave
+	var dummy string
+	fmt.Scanf("Press Enter to leave..", &dummy)
+
 	// // Notify No Task is pending
 	// fmt.Println("All Task is completed.")
 
