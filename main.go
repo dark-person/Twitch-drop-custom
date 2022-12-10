@@ -2,35 +2,49 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
 )
 
-type schedule struct {
-	task_id     int
-	start_time  time.Time
-	twitch_link string
-	duration    int // in minutes
-}
-
 type ScheduleConfig struct {
-	Link string
-	// start_time string `mapstructure:"start_time"`
-	Duration int
+	Link           string
+	Start_time     string
+	Duration       int
+	start_time_obj time.Time
 }
 
 func (config *ScheduleConfig) ToString() string {
-	return fmt.Sprintf("Link: %s, Duration: %d", config.Link, config.Duration)
+	return fmt.Sprintf("Link: %s, Start at: %s, Duration: %d min (%s)", config.Link, config.Start_time, config.Duration, config.start_time_obj)
+}
+
+func (config *ScheduleConfig) ToHumanString() string {
+	return fmt.Sprintf("Start at: %s, in %s for %d minutes", config.Start_time, config.Link, config.Duration)
 }
 
 type Config struct {
-	Version int `mapstructure:"last_updated"`
-	Task    []ScheduleConfig
+	Version   int              `mapstructure:"last_updated"`
+	Task_list []ScheduleConfig `mapstructure:"task"`
 	//Task []map[string]string
 }
 
+type PendingList struct {
+	// Threa Safe desgin of pending tasks
+	mux     sync.Mutex
+	pending []ScheduleConfig
+}
+
 // =================================
+
+func print_pending_task(verified_tasks []ScheduleConfig) {
+	fmt.Println("No. of Task are waiting:", len(verified_tasks))
+	for i, task := range verified_tasks {
+		fmt.Printf("%2d : %s\n", i+1, task.ToHumanString())
+	}
+}
 
 func main() {
 	viper.SetConfigFile("schedule.yaml")
@@ -40,133 +54,98 @@ func main() {
 		panic(fmt.Errorf("fatal error config file: %w", err))
 	}
 
-	var temp Config
-	err = viper.Unmarshal(&temp)
-	fmt.Println(temp.Version)
-	for _, task := range temp.Task {
-		fmt.Println(task.ToString())
+	var config Config
+	err = viper.Unmarshal(&config)
+	if err != nil {
+		fmt.Println("Error when unmarshalling config file: ", err)
+	}
+	fmt.Println(config.Version)
+
+	// Parse the start time to Time Object
+	var verified_tasks []ScheduleConfig
+
+	for _, task := range config.Task_list {
+		task.start_time_obj, err = time.ParseInLocation("2006-01-02 15:04:05", task.Start_time, time.Local)
+		if err != nil {
+			fmt.Println("[WARN] Ini Date format not correct", err)
+			continue
+		}
+
+		// Notify the outdated task
+		if task.start_time_obj.Before(time.Now()) {
+			fmt.Println("Task (Start at", task.Start_time, "Outdated.")
+			continue
+		}
+
+		verified_tasks = append(verified_tasks, task)
+		//fmt.Println(task.ToString())
 	}
 
-	// version_number := viper.GetInt("last_updated")
-	// fmt.Println(version_number)
+	// Sort the object due to time order
+	sort.Slice(verified_tasks, func(i, j int) bool {
+		if verified_tasks[i].start_time_obj.Before(verified_tasks[j].start_time_obj) {
+			return true
+		}
+		if verified_tasks[i].start_time_obj.Equal(verified_tasks[j].start_time_obj) && verified_tasks[i].Duration < verified_tasks[j].Duration {
+			return true
+		}
+		return false
+	})
 
-	// var temp ScheduleConfig
-	// err = viper.UnmarshalKey("a", &temp)
-	// if err != nil {
-	// 	fmt.Println("Error:", err)
-	// 	return
-	// }
+	// Prepare UI for start program.
+	print_pending_task(verified_tasks)
+	fmt.Printf("\n\n") // Seperation
 
-	//fmt.Println(temp)
+	// Prepare worker pool
+	concurrentGoroutines := make(chan struct{}, 5)
+	var wg sync.WaitGroup
 
-	// var config []ScheduleConfig
-	// if err := viper.UnmarshalKey("task", &config); err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
-	// fmt.Println(config)
+	// Create pending tasks object
+	var pending_list PendingList
+	pending_list.pending = verified_tasks[0:]
 
-	// //var twitch_link string
-	// //var duration_minute int
-	// task_list := make([]schedule, 0)
+	// Start Main loop
+	fmt.Println("Main Function Starting...")
+	for i, item := range verified_tasks {
+		// Wait Group Increment
+		wg.Add(1)
 
-	// // flag.StringVar(&twitch_link, "link", "https://www.twitch.tv/warframe", "[Required] The link for twitch drop")
-	// // flag.IntVar(&duration_minute, "time", 60, "[Required] The duration for the stream last. Unit is minute. Default is 60 minutes.")
-	// flag.Parse()
+		go func(item ScheduleConfig, i int) {
+			// Defer Done() for WaitGroup
+			defer wg.Done()
+			concurrentGoroutines <- struct{}{}
 
-	// // Read the config from external files
-	// config, err := ini.Load("schedule.ini")
-	// if err != nil {
-	// 	fmt.Printf("Fail to read file: %v", err)
-	// 	os.Exit(1)
-	// }
+			// Sleep until time come
+			time.Sleep(time.Until(item.start_time_obj))
 
-	// // Get Task Number
-	// task_count := config.Section("").Key("task_count").MustInt()
-	// // version_number := config.Section("").Key("last_updated").MustInt()
+			// Time matched, start the batch script with parameters
+			fmt.Println("Task Started:", item.Link, "for", item.Duration, "minutes. End at", item.start_time_obj.Add(time.Duration(10)*time.Minute).Format("2006-01-02 15:04:05"))
+			fmt.Println()
 
-	// for i := 0; i < task_count; i++ {
-	// 	section := strconv.Itoa(i + 1)
-	// 	twitch_link := config.Section(section).Key("link").String()
-	// 	duration_minute := config.Section(section).Key("duration").MustInt()
-	// 	start_time := config.Section(section).Key("start_time").String()
+			// cmd1 := exec.Command("cmd.exe", "/C", "start", "https://www.twitch.tv/drops/inventory")
+			// cmd1.Start()
+			// time.Sleep(time.Duration(10) * time.Second)
 
-	// 	fmt.Println("Twitch Link:", twitch_link)
-	// 	fmt.Println("Duration:", duration_minute, "minute")
-	// 	fmt.Println("Start at: ", start_time)
-	// 	fmt.Println()
+			cmd2 := exec.Command("cmd.exe", "/C", "start", item.Link)
+			cmd2.Start()
 
-	// 	// Parse the start time to Time Object
-	// 	//until, err := time.Parse("2006-01-02 15:04:05 +0800 CST", start_time+" +0800 CST")
-	// 	until, err := time.ParseInLocation("2006-01-02 15:04:05", start_time, time.Local)
-	// 	if err != nil {
-	// 		fmt.Println("Ini Date format not correct", err)
-	// 		os.Exit(1)
-	// 	}
+			// Wait the duration
+			time.Sleep(time.Duration(item.Duration) * time.Minute)
 
-	// 	// Parse the config to object
-	// 	task_list = append(task_list, schedule{task_id: i + 1, twitch_link: twitch_link, duration: duration_minute, start_time: until})
-	// }
+			// Update pending list
+			pending_list.mux.Lock()
+			fmt.Println("Task for", item.Link, "Completed.")
+			pending_list.pending = pending_list.pending[1:]
+			print_pending_task(pending_list.pending)
+			fmt.Printf("\n\n")
+			pending_list.mux.Unlock()
 
-	// // Sort the object due to time order
-	// sort.Slice(task_list, func(i, j int) bool {
+			<-concurrentGoroutines
+		}(item, i)
+	}
 
-	// 	if task_list[i].start_time.Before(task_list[j].start_time) {
-	// 		return true
-	// 	}
-
-	// 	if task_list[i].start_time.Equal(task_list[j].start_time) && task_list[i].task_id < task_list[j].task_id {
-	// 		return true
-	// 	}
-
-	// 	return false
-	// })
-
-	// fmt.Println(task_list)
-
-	// // Prepare worker pool
-	// concurrentGoroutines := make(chan struct{}, 5)
-
-	// var wg sync.WaitGroup
-
-	// // Start Main loop
-	// for _, item := range task_list {
-	// 	// Wait Group Increment
-	// 	wg.Add(1)
-
-	// 	go func(item schedule) {
-	// 		// Defer Done() for WaitGroup
-	// 		defer wg.Done()
-	// 		concurrentGoroutines <- struct{}{}
-
-	// 		// Notify the outdated task
-	// 		if item.start_time.Before(time.Now()) {
-	// 			fmt.Println("Task", item.task_id, "Outdated.")
-	// 			<-concurrentGoroutines
-	// 			return
-	// 		}
-
-	// 		// Sleep until time come
-	// 		// fmt.Println("Sleeping...")
-	// 		time.Sleep(time.Until(item.start_time))
-
-	// 		// Time matched, start the batch script with parameters
-	// 		cmd1 := exec.Command("cmd.exe", "/C", "start", "https://www.twitch.tv/drops/inventory")
-	// 		cmd1.Start()
-	// 		time.Sleep(time.Duration(10) * time.Second)
-
-	// 		cmd2 := exec.Command("cmd.exe", "/C", "start", item.twitch_link)
-	// 		cmd2.Start()
-
-	// 		// Wait the duration
-	// 		// fmt.Println("Sleeping...")
-	// 		time.Sleep(time.Duration(item.duration) * time.Minute)
-
-	// 		<-concurrentGoroutines
-	// 	}(item)
-	// }
-
-	// wg.Wait()
+	wg.Wait()
+	fmt.Println("All Task is completed.")
 
 	// // Notify No Task is pending
 	// fmt.Println("All Task is completed.")
